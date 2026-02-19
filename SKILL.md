@@ -1,8 +1,7 @@
-***
-
+---
 name: saving-to-obsidian
 description: "Save or update markdown notes to Obsidian vault via Fast Note Sync API. Use when any skill or workflow needs to write content to Obsidian. Trigger keywords: save to obsidian, upload note, 存入Obsidian, 寫入筆記, 上傳筆記."
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+---
 
 # Saving to Obsidian — 筆記寫入原子技能
 
