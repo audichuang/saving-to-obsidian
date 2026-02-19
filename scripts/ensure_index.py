@@ -25,10 +25,10 @@ type: index
 # 📚 {title}
 
 ```dataview
-TABLE date AS "日期", category AS "分類", source AS "來源"
+TABLE file.ctime AS "加入時間", category AS "分類", source AS "來源"
 FROM "{folder}"
 WHERE type != "index"
-SORT date DESC
+SORT file.ctime DESC
 ```
 """
 
