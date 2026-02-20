@@ -5,8 +5,8 @@ ensure_index.py — 確保 Dataview 索引頁面存在
 在指定資料夾建立 _index.md，包含 Dataview 查詢表格。
 
 用法:
-  doppler run -p finviz -c dev -- python3 ensure_index.py --folder collections
-  doppler run -p finviz -c dev -- python3 ensure_index.py --folder finviz-stock --title "Finviz Reports"
+  doppler run -p storage -c dev -- python3 ensure_index.py --folder collections
+  doppler run -p storage -c dev -- python3 ensure_index.py --folder finviz-stock --title "Finviz Reports"
 """
 
 import argparse

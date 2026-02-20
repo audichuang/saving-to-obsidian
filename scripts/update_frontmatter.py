@@ -6,7 +6,7 @@ update_frontmatter.py — 更新 Obsidian 筆記的 YAML frontmatter
 不需要重新上傳整篇內容。
 
 用法:
-  doppler run -p finviz -c dev -- python3 update_frontmatter.py \
+  doppler run -p storage -c dev -- python3 update_frontmatter.py \
     --path "collections/2026-02-18-標題.md" \
     --updates '{"category": "Tutorial", "tags": "python"}'
 """

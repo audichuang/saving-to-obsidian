@@ -11,7 +11,7 @@ description: "Save or update markdown notes to Obsidian vault via Fast Note Sync
 
 ## 環境設定
 
-> **Doppler 配置**: `doppler run -p finviz -c dev --`
+> **Doppler 配置**: `doppler run -p storage -c dev --`
 
 | 環境變數 | 說明 |
 |----------|------|
@@ -25,13 +25,13 @@ description: "Save or update markdown notes to Obsidian vault via Fast Note Sync
 
 ```bash
 # 上傳檔案
-doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py report.md --path "folder/report.md"
+doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py report.md --path "folder/report.md"
 
 # 從 stdin
-echo "# content" | doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py --stdin --path "folder/note.md"
+echo "# content" | doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py --stdin --path "folder/note.md"
 
 # 直接傳入內容
-doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py --content "# Hello" --path "folder/note.md"
+doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save_note.py --content "# Hello" --path "folder/note.md"
 ```
 
 輸出 JSON: `{"success": true, "note_path": "...", "version": "...", "id": "..."}`
@@ -39,7 +39,7 @@ doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/save
 ### update\_frontmatter.py — 修改 YAML frontmatter
 
 ```bash
-doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/update_frontmatter.py \
+doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/update_frontmatter.py \
   --path "collections/2026-02-18-標題.md" \
   --updates '{"category": "Tutorial", "tags": "python"}'
 ```
@@ -47,6 +47,6 @@ doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/upda
 ### ensure\_index.py — 建立 Dataview 索引頁
 
 ```bash
-doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/ensure_index.py --folder collections
-doppler run -p finviz -c dev -- python3 ~/skills/saving-to-obsidian/scripts/ensure_index.py --folder finviz-stock --title "Finviz Reports"
+doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/ensure_index.py --folder collections
+doppler run -p storage -c dev -- python3 ~/skills/saving-to-obsidian/scripts/ensure_index.py --folder finviz-stock --title "Finviz Reports"
 ```

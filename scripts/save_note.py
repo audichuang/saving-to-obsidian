@@ -9,16 +9,16 @@ save_note.py — 通用 Obsidian 筆記寫入工具 (Fast Note Sync API)
 
 用法:
   # 上傳檔案
-  doppler run -p finviz -c dev -- python3 save_note.py report.md
+  doppler run -p storage -c dev -- python3 save_note.py report.md
 
   # 指定 Vault 內路徑
-  doppler run -p finviz -c dev -- python3 save_note.py report.md --path "folder/report.md"
+  doppler run -p storage -c dev -- python3 save_note.py report.md --path "folder/report.md"
 
   # 從 stdin 讀取
-  echo "# content" | doppler run -p finviz -c dev -- python3 save_note.py --stdin --path "folder/note.md"
+  echo "# content" | doppler run -p storage -c dev -- python3 save_note.py --stdin --path "folder/note.md"
 
   # 直接傳入內容字串
-  doppler run -p finviz -c dev -- python3 save_note.py --content "# Hello" --path "folder/note.md"
+  doppler run -p storage -c dev -- python3 save_note.py --content "# Hello" --path "folder/note.md"
 """
 
 import argparse
@@ -61,7 +61,7 @@ def get_env():
 
     if not base_url or not token:
         print("錯誤: 需要設定 FAST_NOTE_URL 和 FAST_NOTE_TOKEN 環境變數", file=sys.stderr)
-        print("請確認已用 doppler: doppler run -p finviz -c dev -- ...", file=sys.stderr)
+        print("請確認已用 doppler: doppler run -p storage -c dev -- ...", file=sys.stderr)
         sys.exit(1)
 
     return base_url, token, vault
