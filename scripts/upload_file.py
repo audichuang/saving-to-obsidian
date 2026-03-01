@@ -26,6 +26,8 @@ import struct
 import sys
 import threading
 import time
+import urllib.request
+import urllib.error
 
 try:
     import websocket
@@ -72,8 +74,27 @@ def build_ws_url(base_url: str) -> str:
     return ws_url + "/api/user/sync"
 
 
-def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token: str) -> dict:
-    """透過 WebSocket 上傳單個檔案，回傳結果 dict。"""
+def verify_file_via_rest(base_url: str, token: str, vault: str, remote_path: str, expected_hash: str) -> bool:
+    """透過 REST API 驗證檔案是否已成功上傳到伺服器。"""
+    url = f"{base_url.rstrip('/')}/api/file/info?vault={urllib.request.quote(vault)}&path={urllib.request.quote(remote_path)}"
+    req = urllib.request.Request(url, headers={"token": token})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read())
+            if body.get("code") == 1 and body.get("data"):
+                server_hash = body["data"].get("contentHash", "")
+                return server_hash == expected_hash
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        pass
+    return False
+
+
+def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, base_url: str, token: str) -> dict:
+    """透過 WebSocket 上傳單個檔案，回傳結果 dict。
+
+    策略：送完所有 binary chunks 後，透過 REST API 驗證上傳結果。
+    不依賴伺服器的 WebSocket 完成回應（因 is-return-sussess=false 時不會發送）。
+    """
 
     file_size = os.path.getsize(file_path)
     file_mtime = int(os.path.getmtime(file_path) * 1000)
@@ -81,14 +102,9 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
     path_hash = java_hash(remote_path)
     content_hash = hash_file_bytes(file_path)
 
-    state = {"done": False, "error": None, "session_id": None}
+    # 狀態：chunks_sent 表示所有分塊已發送完畢（但伺服器可能還在處理）
+    state = {"done": False, "error": None, "chunks_sent": False, "no_update": False}
     done_event = threading.Event()
-
-    # 需要忽略的 broadcast action（伺服器會廣播給所有 client）
-    BROADCAST_ACTIONS = {
-        "FileSyncUpdate", "FileSyncDelete", "FileSyncRename",
-        "FileSyncMtime", "FileSyncChunkDownload",
-    }
 
     def on_open(ws):
         ws.send(f"Authorization|{token}")
@@ -96,12 +112,18 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
     def on_message(ws, raw):
         idx = raw.find("|")
         if idx == -1:
+            # 無 action prefix 的回應（可能是 is-return-sussess=true 時的 Success 回應）
+            try:
+                body = json.loads(raw)
+                if body.get("code") in (1, 6) and state.get("chunks_sent"):
+                    state["done"] = True
+                    done_event.set()
+                    ws.close()
+            except json.JSONDecodeError:
+                pass
             return
-        action, body = raw[:idx], json.loads(raw[idx + 1:])
 
-        # 忽略伺服器 broadcast 訊息（來自其他 client 的同步通知）
-        if action in BROADCAST_ACTIONS:
-            return
+        action, body = raw[:idx], json.loads(raw[idx + 1:])
 
         if action == "Authorization":
             if body.get("status"):
@@ -123,16 +145,16 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
             }))
             return
 
-        if action == "FileUploadCheck":
-            # code=2 表示伺服器已有相同內容，無需上傳
-            if body.get("code") == 2:
-                state["done"] = True
-                done_event.set()
-                ws.close()
-            return
-
         if action == "FileUpload":
             data = body.get("data", {})
+            # code == 6 (SuccessNoUpdate) 表示伺服器已有相同內容
+            if body.get("code") == 6:
+                state["done"] = True
+                state["no_update"] = True
+                done_event.set()
+                ws.close()
+                return
+
             sid = data.get("sessionId")
             chunk_size = data.get("chunkSize", 524288)
             if not sid:
@@ -141,7 +163,6 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
                 ws.close()
                 return
 
-            state["session_id"] = sid
             # Send binary chunks
             with open(file_path, "rb") as f:
                 i = 0
@@ -152,10 +173,19 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
                     payload = b"00" + sid.encode("ascii") + struct.pack(">I", i) + chunk
                     ws.send(payload, opcode=websocket.ABNF.OPCODE_BINARY)
                     i += 1
+
+            # 所有 chunks 已發送
+            state["chunks_sent"] = True
+
+            # 等一下伺服器處理，然後主動關閉連線
+            # 伺服器可能不會回傳 Success（is-return-sussess=false），所以不依賴回應
+            time.sleep(2)
+            done_event.set()
+            ws.close()
             return
 
-        # 上傳完成：伺服器回 code=1 且我們有 session_id（表示分塊上傳已完成）
-        if body.get("code") == 1 and state.get("session_id"):
+        # 兜底：任何帶 action 且 code=1 的回應（is-return-sussess=true 時可能出現）
+        if body.get("code") == 1 and state.get("chunks_sent"):
             state["done"] = True
             done_event.set()
             ws.close()
@@ -174,15 +204,29 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
     t.start()
     done_event.wait(timeout=60)
 
-    # 確保 WebSocket 連線完全關閉再返回
+    # 確保 WebSocket 連線完全關閉
     ws.close()
     t.join(timeout=5)
 
+    basename = os.path.basename(file_path)
+
     if state["error"]:
-        return {"file": os.path.basename(file_path), "path": remote_path, "success": False, "error": state["error"]}
-    if state["done"]:
-        return {"file": os.path.basename(file_path), "path": remote_path, "success": True}
-    return {"file": os.path.basename(file_path), "path": remote_path, "success": False, "error": "timeout"}
+        return {"file": basename, "path": remote_path, "success": False, "error": state["error"]}
+
+    # 如果伺服器回應了完成（is-return-sussess=true）或無需更新
+    if state["done"] and (state["no_update"] or not state["chunks_sent"]):
+        return {"file": basename, "path": remote_path, "success": True}
+
+    # 送完 chunks 後，用 REST API 驗證檔案是否已到伺服器
+    if state["chunks_sent"]:
+        # 最多重試 3 次，每次間隔 2 秒（給伺服器時間處理）
+        for attempt in range(3):
+            if verify_file_via_rest(base_url, token, vault, remote_path, content_hash):
+                return {"file": basename, "path": remote_path, "success": True}
+            time.sleep(2)
+        return {"file": basename, "path": remote_path, "success": False, "error": "chunks sent but verify failed"}
+
+    return {"file": basename, "path": remote_path, "success": False, "error": "timeout"}
 
 
 def main():
@@ -198,7 +242,7 @@ def main():
     ws_url = build_ws_url(base_url)
 
     results = []
-    for i, fp in enumerate(args.files):
+    for fp in args.files:
         if not os.path.isfile(fp):
             results.append({"file": fp, "success": False, "error": "file not found"})
             continue
@@ -206,14 +250,10 @@ def main():
         basename = os.path.basename(fp)
         remote_path = f"{args.prefix.strip('/')}/{basename}" if args.prefix else basename
 
-        result = upload_one(fp, remote_path, vault, ws_url, token)
+        result = upload_one(fp, remote_path, vault, ws_url, base_url, token)
         status = "✅" if result["success"] else "❌"
         print(f"{status} {result['path']}", file=sys.stderr)
         results.append(result)
-
-        # 多檔案時，等待伺服器完全處理完再開始下一個
-        if i < len(args.files) - 1:
-            time.sleep(1)
 
     print(json.dumps(results, ensure_ascii=False))
 
