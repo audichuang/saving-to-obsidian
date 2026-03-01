@@ -84,6 +84,12 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
     state = {"done": False, "error": None, "session_id": None}
     done_event = threading.Event()
 
+    # 需要忽略的 broadcast action（伺服器會廣播給所有 client）
+    BROADCAST_ACTIONS = {
+        "FileSyncUpdate", "FileSyncDelete", "FileSyncRename",
+        "FileSyncMtime", "FileSyncChunkDownload",
+    }
+
     def on_open(ws):
         ws.send(f"Authorization|{token}")
 
@@ -92,6 +98,10 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
         if idx == -1:
             return
         action, body = raw[:idx], json.loads(raw[idx + 1:])
+
+        # 忽略伺服器 broadcast 訊息（來自其他 client 的同步通知）
+        if action in BROADCAST_ACTIONS:
+            return
 
         if action == "Authorization":
             if body.get("status"):
@@ -111,6 +121,14 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
                 "pathHash": path_hash, "contentHash": content_hash,
                 "size": file_size, "ctime": file_ctime, "mtime": file_mtime,
             }))
+            return
+
+        if action == "FileUploadCheck":
+            # code=2 表示伺服器已有相同內容，無需上傳
+            if body.get("code") == 2:
+                state["done"] = True
+                done_event.set()
+                ws.close()
             return
 
         if action == "FileUpload":
@@ -136,8 +154,8 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
                     i += 1
             return
 
-        # Upload complete or no-update
-        if body.get("code") in (1, 2) and (state.get("session_id") or body.get("code") == 2):
+        # 上傳完成：伺服器回 code=1 且我們有 session_id（表示分塊上傳已完成）
+        if body.get("code") == 1 and state.get("session_id"):
             state["done"] = True
             done_event.set()
             ws.close()
@@ -155,6 +173,10 @@ def upload_one(file_path: str, remote_path: str, vault: str, ws_url: str, token:
     t.daemon = True
     t.start()
     done_event.wait(timeout=60)
+
+    # 確保 WebSocket 連線完全關閉再返回
+    ws.close()
+    t.join(timeout=5)
 
     if state["error"]:
         return {"file": os.path.basename(file_path), "path": remote_path, "success": False, "error": state["error"]}
@@ -176,7 +198,7 @@ def main():
     ws_url = build_ws_url(base_url)
 
     results = []
-    for fp in args.files:
+    for i, fp in enumerate(args.files):
         if not os.path.isfile(fp):
             results.append({"file": fp, "success": False, "error": "file not found"})
             continue
@@ -188,6 +210,10 @@ def main():
         status = "✅" if result["success"] else "❌"
         print(f"{status} {result['path']}", file=sys.stderr)
         results.append(result)
+
+        # 多檔案時，等待伺服器完全處理完再開始下一個
+        if i < len(args.files) - 1:
+            time.sleep(1)
 
     print(json.dumps(results, ensure_ascii=False))
 
