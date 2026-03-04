@@ -5,8 +5,14 @@ ensure_index.py — 確保 Dataview 索引頁面存在
 在指定資料夾建立 _index.md，包含 Dataview 查詢表格。
 
 用法:
-  doppler run -p storage -c dev -- python3 ensure_index.py --folder collections
+  # 基本用法（預設欄位：date, title）
+  doppler run -p storage -c dev -- python3 ensure_index.py --folder daily-log
+
+  # 自訂標題
   doppler run -p storage -c dev -- python3 ensure_index.py --folder finviz-stock --title "Finviz Reports"
+
+  # 自訂 Dataview 欄位（逗號分隔，格式：field 或 field:顯示名）
+  doppler run -p storage -c dev -- python3 ensure_index.py --folder collections --columns "date:日期,category:分類,source:來源"
 """
 
 import argparse
@@ -17,7 +23,21 @@ import urllib.request
 import urllib.error
 
 
-DEFAULT_TEMPLATE = """---
+def build_dataview_table(columns: str, folder: str) -> str:
+    """解析 columns 字串，產生 Dataview TABLE 語句。"""
+    parts = []
+    for col in columns.split(","):
+        col = col.strip()
+        if ":" in col:
+            field, alias = col.split(":", 1)
+            parts.append(f'{field.strip()} AS "{alias.strip()}"')
+        else:
+            parts.append(col)
+    cols_str = ", ".join(parts)
+    return f'TABLE {cols_str}\nFROM "{folder}"\nWHERE type != "index"\nSORT date DESC'
+
+
+TEMPLATE = """---
 title: {title}
 type: index
 ---
@@ -25,18 +45,17 @@ type: index
 # 📚 {title}
 
 ```dataview
-TABLE date AS "日期", category AS "分類", source AS "來源"
-FROM "{folder}"
-WHERE type != "index"
-SORT date DESC
+{dataview_query}
 ```
 """
 
 
 def main():
     parser = argparse.ArgumentParser(description="建立/更新 Dataview 索引頁面")
-    parser.add_argument("--folder", "-f", default="collections", help="Vault 內的資料夾 (預設: collections)")
-    parser.add_argument("--title", "-t", default=None, help="索引頁標題 (預設: Folder Index)")
+    parser.add_argument("--folder", "-f", required=True, help="Vault 內的資料夾")
+    parser.add_argument("--title", "-t", default=None, help="索引頁標題 (預設: 資料夾名稱 + Index)")
+    parser.add_argument("--columns", "-c", default="date:日期,title:標題",
+                        help="Dataview 欄位 (逗號分隔，格式：field 或 field:顯示名)")
     parser.add_argument("--vault", "-v", help="覆寫 Vault 名稱")
     args = parser.parse_args()
 
@@ -49,7 +68,8 @@ def main():
         sys.exit(1)
 
     title = args.title or f"{args.folder.replace('-', ' ').title()} Index"
-    content = DEFAULT_TEMPLATE.format(title=title, folder=args.folder).strip() + "\n"
+    dataview_query = build_dataview_table(args.columns, args.folder)
+    content = TEMPLATE.format(title=title, dataview_query=dataview_query).strip() + "\n"
 
     url = f"{base_url.rstrip('/')}/api/note"
     payload = json.dumps({
